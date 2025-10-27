@@ -126,6 +126,67 @@ public class SwiftPresentationDisplaysPlugin: NSObject, FlutterPlugin {
 
     }
 
+    private var secondaryEngine: FlutterEngine?  // Keep a strong reference to the engine
+
+    private func showPresentation(
+        index: Int,
+        routerName: String,
+        completion: @escaping (Bool) -> Void
+    ) {
+        guard index > 0,
+            index < self.screens.count,
+            let window = self.additionalWindows[self.screens[index]]
+        else {
+            completion(false)
+            return
+        }
+
+        window.isHidden = false
+
+        // If we already have a controller, just reuse it
+        if let vc = window.rootViewController as? FlutterViewController {
+            completion(true)
+            return
+        }
+
+        // Create a new engine and keep a strong reference
+        self.secondaryEngine = FlutterEngine(name: "secondary_display_engine")
+
+        guard let engine = self.secondaryEngine else {
+            completion(false)
+            return
+        }
+
+        // Run the Dart entrypoint
+        let success = engine.run(
+            withEntrypoint: "externalDisplayMain",
+            initialRoute: routerName
+        )
+
+        guard success else {
+            completion(false)
+            return
+        }
+
+        // Register plugins for this engine
+        // GeneratedPluginRegistrant.register(with: engine)
+
+        // Create FlutterViewController using the engine
+        let extVC = FlutterViewController(engine: engine, nibName: nil, bundle: nil)
+        SwiftPresentationDisplaysPlugin.controllerAdded?(extVC)
+
+        // Set the window's rootViewController
+        window.rootViewController = extVC
+
+        // Setup method channel
+        self.flutterEngineChannel = FlutterMethodChannel(
+            name: "presentation_displays_plugin_engine",
+            binaryMessenger: extVC.binaryMessenger
+        )
+
+        completion(true)
+    }
+
     // private func showPresentation(index: Int, routerName: String) {
     //     if index > 0 && index < self.screens.count
     //         && self.additionalWindows.keys.contains(self.screens[index])
@@ -155,48 +216,48 @@ public class SwiftPresentationDisplaysPlugin: NSObject, FlutterPlugin {
     //     }
     // }
 
-    private func showPresentation(
-        index: Int, routerName: String, completion: @escaping (Bool) -> Void
-    ) {
-        guard index > 0,
-            index < self.screens.count,
-            let window = self.additionalWindows[self.screens[index]]
-        else {
-            completion(false)
-            return
-        }
+    // private func showPresentation(
+    //     index: Int, routerName: String, completion: @escaping (Bool) -> Void
+    // ) {
+    //     guard index > 0,
+    //         index < self.screens.count,
+    //         let window = self.additionalWindows[self.screens[index]]
+    //     else {
+    //         completion(false)
+    //         return
+    //     }
 
-        window.isHidden = false
+    //     window.isHidden = false
 
-        // If we already have a controller, just reuse it
-        if let vc = window.rootViewController as? FlutterViewController {
-            completion(true)
-            return
-        }
+    //     // If we already have a controller, just reuse it
+    //     if let vc = window.rootViewController as? FlutterViewController {
+    //         completion(true)
+    //         return
+    //     }
 
-        // Create a new engine
-        let flutterEngine = FlutterEngine(name: "secondary_display_engine")
-        let success = flutterEngine.run(
-            withEntrypoint: "externalDisplayMain",
-            initialRoute: routerName
-        )
+    //     // Create a new engine
+    //     let flutterEngine = FlutterEngine(name: "secondary_display_engine")
+    //     let success = flutterEngine.run(
+    //         withEntrypoint: "externalDisplayMain",
+    //         initialRoute: routerName
+    //     )
 
-        guard success else {
-            completion(false)
-            return
-        }
+    //     guard success else {
+    //         completion(false)
+    //         return
+    //     }
 
-        let extVC = FlutterViewController(engine: flutterEngine, nibName: nil, bundle: nil)
-        SwiftPresentationDisplaysPlugin.controllerAdded?(extVC)
-        window.rootViewController = extVC
+    //     let extVC = FlutterViewController(engine: flutterEngine, nibName: nil, bundle: nil)
+    //     SwiftPresentationDisplaysPlugin.controllerAdded?(extVC)
+    //     window.rootViewController = extVC
 
-        self.flutterEngineChannel = FlutterMethodChannel(
-            name: "presentation_displays_plugin_engine",
-            binaryMessenger: extVC.binaryMessenger
-        )
+    //     self.flutterEngineChannel = FlutterMethodChannel(
+    //         name: "presentation_displays_plugin_engine",
+    //         binaryMessenger: extVC.binaryMessenger
+    //     )
 
-        completion(true)
-    }
+    //     completion(true)
+    // }
 
     // private func showPresentation(index: Int, routerName: String) {
     //     if index > 0 && index < self.screens.count,

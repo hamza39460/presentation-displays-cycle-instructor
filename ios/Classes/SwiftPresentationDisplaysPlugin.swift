@@ -2,23 +2,25 @@ import Flutter
 import UIKit
 
 public class SwiftPresentationDisplaysPlugin: NSObject, FlutterPlugin {
-    var additionalWindows = [UIScreen:UIWindow]()
+    var additionalWindows = [UIScreen: UIWindow]()
     var screens = [UIScreen]()
-    var flutterEngineChannel:FlutterMethodChannel?=nil
-    public static var controllerAdded: ((FlutterViewController)->Void)?
+    var flutterEngineChannel: FlutterMethodChannel? = nil
+    public static var controllerAdded: ((FlutterViewController) -> Void)?
 
     public override init() {
         super.init()
 
         screens.append(UIScreen.main)
-        NotificationCenter.default.addObserver(forName: UIScreen.didConnectNotification,
-                                               object: nil, queue: nil) {
+        NotificationCenter.default.addObserver(
+            forName: UIScreen.didConnectNotification,
+            object: nil, queue: nil
+        ) {
             notification in
 
             // Get the new screen information.
             guard let newScreen = notification.object as? UIScreen else {
-                    return
-                  }
+                return
+            }
 
             let screenDimensions = newScreen.bounds
             // Configure a window for the screen.
@@ -34,158 +36,242 @@ public class SwiftPresentationDisplaysPlugin: NSObject, FlutterPlugin {
 
         }
 
-        NotificationCenter.default.addObserver(forName:
-                                                UIScreen.didDisconnectNotification,
-                                               object: nil,
-                                               queue: nil) { notification in
+        NotificationCenter.default.addObserver(
+            forName:
+                UIScreen.didDisconnectNotification,
+            object: nil,
+            queue: nil
+        ) { notification in
             guard let screen = notification.object as? UIScreen else {
-                    return
-                  }
+                return
+            }
 
-           // Remove the window associated with the screen.
-                 for s in self.screens {
-                   if s == screen {
-                     if let index = self.screens.firstIndex(of: s) {
-                       self.screens.remove(at: index)
-                       // Remove the window and its contents.
-                       self.additionalWindows.removeValue(forKey: s)
-                     }
-                   }
-                 }
+            // Remove the window associated with the screen.
+            for s in self.screens {
+                if s == screen {
+                    if let index = self.screens.firstIndex(of: s) {
+                        self.screens.remove(at: index)
+                        // Remove the window and its contents.
+                        self.additionalWindows.removeValue(forKey: s)
+                    }
+                }
+            }
         }
     }
-    
+
     public static func register(with registrar: FlutterPluginRegistrar) {
-        let channel = FlutterMethodChannel(name: "presentation_displays_plugin", binaryMessenger: registrar.messenger())
+        let channel = FlutterMethodChannel(
+            name: "presentation_displays_plugin", binaryMessenger: registrar.messenger())
         let instance = SwiftPresentationDisplaysPlugin()
         registrar.addMethodCallDelegate(instance, channel: channel)
-        
-        let eventChannel = FlutterEventChannel(name: "presentation_displays_plugin_events", binaryMessenger: registrar.messenger())
+
+        let eventChannel = FlutterEventChannel(
+            name: "presentation_displays_plugin_events", binaryMessenger: registrar.messenger())
         let displayConnectedStreamHandler = DisplayConnectedStreamHandler()
         eventChannel.setStreamHandler(displayConnectedStreamHandler)
     }
 
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
         if call.method == "listDisplay" {
-            var jsonDisplaysList = "[";
+            var jsonDisplaysList = "["
             for i in 0..<screens.count {
-                jsonDisplaysList+="{\"displayId\":"+String(i)+", \"name\":\"Screen "+String(i)+"\"},"
+                jsonDisplaysList +=
+                    "{\"displayId\":" + String(i) + ", \"name\":\"Screen " + String(i) + "\"},"
             }
             jsonDisplaysList = String(jsonDisplaysList.dropLast())
-            jsonDisplaysList+="]"
-            jsonDisplaysList = jsonDisplaysList.replacingOccurrences(of: "Screen 0", with: "Built-in Screen")
+            jsonDisplaysList += "]"
+            jsonDisplaysList = jsonDisplaysList.replacingOccurrences(
+                of: "Screen 0", with: "Built-in Screen")
             result(jsonDisplaysList)
-        }
-        else if call.method=="showPresentation"{
+        } else if call.method == "showPresentation" {
+            guard
+                let args = call.arguments as? String,
+                let data = args.data(using: .utf8),
+                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else {
+                result(false)
+                return
+            }
+
+            let index = json["displayId"] as? Int ?? 1
+            let routerName = json["routerName"] as? String ?? "presentation"
+
+            showPresentation(index: index, routerName: routerName) { success in
+                result(success)
+            }
+        } else if call.method == "hidePresentation" {
             let args = call.arguments as? String
             let data = args?.data(using: .utf8)!
             do {
-                if let json = try JSONSerialization.jsonObject(with: data ?? Data(), options : .allowFragments) as? Dictionary<String,Any>
+                if let json = try JSONSerialization.jsonObject(
+                    with: data ?? Data(), options: .allowFragments) as? [String: Any]
                 {
                     print(json)
-                    showPresentation(index:json["displayId"] as? Int ?? 1, routerName: json["routerName"] as? String ?? "presentation")
+                    hidePresentation(index: json["displayId"] as? Int ?? 1)
                     result(true)
-                }
-                else {
+                } else {
                     print("bad json")
                     result(false)
                 }
-            }
-            catch let error as NSError {
+            } catch let error as NSError {
                 print(error)
                 result(false)
             }
-        }
-        else if call.method=="hidePresentation"{
-            let args = call.arguments as? String
-            let data = args?.data(using: .utf8)!
-            do {
-                if let json = try JSONSerialization.jsonObject(with: data ?? Data(), options : .allowFragments) as? Dictionary<String,Any>
-                {
-                    print(json)
-                    hidePresentation(index:json["displayId"] as? Int ?? 1)
-                    result(true)
-                }
-                else {
-                    print("bad json")
-                    result(false)
-                }
-            }
-            catch let error as NSError {
-                print(error)
-                result(false)
-            }
-        }
-        else if call.method=="transferDataToPresentation"{
+        } else if call.method == "transferDataToPresentation" {
             self.flutterEngineChannel?.invokeMethod("DataTransfer", arguments: call.arguments)
             result(true)
-        }
-        else
-        {
+        } else {
             result(FlutterMethodNotImplemented)
         }
 
     }
 
-    private func showPresentation(index:Int, routerName:String )
-    {
-        if index>0 && index < self.screens.count && self.additionalWindows.keys.contains(self.screens[index])
-        {
-            let screen=self.screens[index]
-            let window=self.additionalWindows[screen]
+    // private func showPresentation(index: Int, routerName: String) {
+    //     if index > 0 && index < self.screens.count
+    //         && self.additionalWindows.keys.contains(self.screens[index])
+    //     {
+    //         let screen = self.screens[index]
+    //         let window = self.additionalWindows[screen]
 
-            if (window != nil){
-                window!.isHidden=false
-                if (window!.rootViewController == nil || !(window!.rootViewController is FlutterViewController)){
-                    let extVC = FlutterViewController(project: nil, initialRoute: routerName, nibName: nil, bundle: nil)
-                    SwiftPresentationDisplaysPlugin.controllerAdded!(extVC)
-                    window?.rootViewController = extVC
+    //         if window != nil {
+    //             window!.isHidden = false
+    //             if window!.rootViewController == nil
+    //                 || !(window!.rootViewController is FlutterViewController)
+    //             {
+    //                 // let extVC = FlutterViewController(project: nil, initialRoute: routerName, nibName: nil, bundle: nil)
+    //                 let flutterEngine = FlutterEngine()
+    //                 flutterEngine.run(
+    //                     withEntrypoint: "externalDisplayMain", initialRoute: routerName)
+    //                 let extVC = FlutterViewController(
+    //                     engine: flutterEngine, nibName: nil, bundle: nil)
+    //                 SwiftPresentationDisplaysPlugin.controllerAdded!(extVC)
+    //                 window?.rootViewController = extVC
 
-                    self.flutterEngineChannel = FlutterMethodChannel(name: "presentation_displays_plugin_engine", binaryMessenger: extVC.binaryMessenger)
-                }
-            }
+    //                 self.flutterEngineChannel = FlutterMethodChannel(
+    //                     name: "presentation_displays_plugin_engine",
+    //                     binaryMessenger: extVC.binaryMessenger)
+    //             }
+    //         }
+    //     }
+    // }
+
+    private func showPresentation(
+        index: Int, routerName: String, completion: @escaping (Bool) -> Void
+    ) {
+        guard index > 0,
+            index < self.screens.count,
+            let window = self.additionalWindows[self.screens[index]]
+        else {
+            completion(false)
+            return
         }
+
+        window.isHidden = false
+
+        // If we already have a controller, just reuse it
+        if let vc = window.rootViewController as? FlutterViewController {
+            completion(true)
+            return
+        }
+
+        // Create a new engine
+        let flutterEngine = FlutterEngine(name: "secondary_display_engine")
+        let success = flutterEngine.run(
+            withEntrypoint: "externalDisplayMain",
+            initialRoute: routerName
+        )
+
+        guard success else {
+            completion(false)
+            return
+        }
+
+        let extVC = FlutterViewController(engine: flutterEngine, nibName: nil, bundle: nil)
+        SwiftPresentationDisplaysPlugin.controllerAdded?(extVC)
+        window.rootViewController = extVC
+
+        self.flutterEngineChannel = FlutterMethodChannel(
+            name: "presentation_displays_plugin_engine",
+            binaryMessenger: extVC.binaryMessenger
+        )
+
+        completion(true)
     }
 
-    private func hidePresentation(index:Int)
-    {
-        if index>0 && index < self.screens.count && self.additionalWindows.keys.contains(self.screens[index])
-        {
-            let screen=self.screens[index]
-            let window=self.additionalWindows[screen]
+    // private func showPresentation(index: Int, routerName: String) {
+    //     if index > 0 && index < self.screens.count,
+    //         let screen = self.screens[safe: index],
+    //         let window = self.additionalWindows[screen]
+    //     {
 
-            window?.isHidden=true
+    //         window.isHidden = false
+
+    //         if window.rootViewController == nil
+    //             || !(window.rootViewController is FlutterViewController)
+    //         {
+    //             let newEngine = FlutterEngine(name: "secondary_engine")
+    //             // Run your secondary entrypoint (must match @pragma name)
+    //             newEngine.run(withEntrypoint: "secondaryMain")
+
+    //             // Optional: register plugins if needed
+    //             FlutterPluginRegistry.registerGeneratedPlugins(newEngine)
+
+    //             let extVC = FlutterViewController(engine: newEngine, nibName: nil, bundle: nil)
+    //             SwiftPresentationDisplaysPlugin.controllerAdded?(extVC)
+    //             window.rootViewController = extVC
+    //             self.flutterEngineChannel = FlutterMethodChannel(
+    //                 name: "presentation_displays_plugin_engine",
+    //                 binaryMessenger: extVC.binaryMessenger
+    //             )
+    //         }
+    //     }
+    // }
+
+    private func hidePresentation(index: Int) {
+        if index > 0 && index < self.screens.count
+            && self.additionalWindows.keys.contains(self.screens[index])
+        {
+            let screen = self.screens[index]
+            let window = self.additionalWindows[screen]
+
+            window?.isHidden = true
         }
     }
 
 }
 
-class DisplayConnectedStreamHandler: NSObject, FlutterStreamHandler{
+class DisplayConnectedStreamHandler: NSObject, FlutterStreamHandler {
     var sink: FlutterEventSink?
     var didConnectObserver: NSObjectProtocol?
     var didDisconnectObserver: NSObjectProtocol?
 
-    func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
+    func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink)
+        -> FlutterError?
+    {
         sink = events
-        didConnectObserver = NotificationCenter.default.addObserver(forName: UIScreen.didConnectNotification,
-                            object: nil, queue: nil) { (notification) in
+        didConnectObserver = NotificationCenter.default.addObserver(
+            forName: UIScreen.didConnectNotification,
+            object: nil, queue: nil
+        ) { (notification) in
             guard let sink = self.sink else { return }
             sink(1)
-           }
-        didDisconnectObserver = NotificationCenter.default.addObserver(forName: UIScreen.didDisconnectNotification,
-                            object: nil, queue: nil) { (notification) in
+        }
+        didDisconnectObserver = NotificationCenter.default.addObserver(
+            forName: UIScreen.didDisconnectNotification,
+            object: nil, queue: nil
+        ) { (notification) in
             guard let sink = self.sink else { return }
             sink(0)
-           }
+        }
         return nil
     }
 
     func onCancel(withArguments arguments: Any?) -> FlutterError? {
         sink = nil
-        if (didConnectObserver != nil){
+        if didConnectObserver != nil {
             NotificationCenter.default.removeObserver(didConnectObserver!)
         }
-        if (didDisconnectObserver != nil){
+        if didDisconnectObserver != nil {
             NotificationCenter.default.removeObserver(didDisconnectObserver!)
         }
         return nil
